@@ -1,0 +1,321 @@
+==imp-it's working==================
+To deploy WordPress on EKS (Kubernetes) without using local Persistent Volumes, and instead connect it to an external RDS MySQL instance, follow these key steps.
+1. If we delete the pod it auto create and connected with RDS db and wp admin comes up with old setting such as user and password
+2. It has done with nodport service it's configration in other file (imp-Ngnix-db & Service -testing.yaml)
+3. If I delete the nodes or upgrades it nodeport server ip will changes in the wordpress database. so we prefer loadbalancer for future.
+
+4. I have revmoved nodeport and DONE WITH LOADBALANCER ==>  http://a923f8bf54f22463d9a827be4f48b280-558497117.us-east-2.elb.amazonaws.com/new-fg/
+
+imp task
+5. There are creating multile loadbalancer for multile site so need ingress controller inside the cluter  --> 9May25
+
+
+
+http://3.141.2.216:30080/wp-login.php?loggedout=true&wp_lang=en_US
+admin
+TestFG@12345
+
+--imp step to launch wp in k8s--------
+wordpress-deployment.yaml
+wordpress-pvc.yaml
+wordpress-secret.yaml
+wordpress-service.yaml
+wp-config-configmap.yaml
+-------------------------
+
+------wordpress-deployment.yaml-----------------------------------------
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress
+  namespace: nxus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wordpress
+  template:
+    metadata:
+      labels:
+        app: wordpress
+    spec:
+      containers:
+      - name: wordpress
+        image: wordpress:6.5-apache
+        ports:
+        - containerPort: 80
+        volumeMounts:
+          - name: wp-config-volume
+            mountPath: /var/www/html/wp-config.php
+            subPath: wp-config.php
+          - mountPath: /var/www/html/wp-content/uploads
+            name: wordpress-pvc
+
+        env:
+        - name: WORDPRESS_DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-secret
+              key: WORDPRESS_DB_HOST
+        - name: WORDPRESS_DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-secret
+              key: WORDPRESS_DB_NAME
+        - name: WORDPRESS_DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-secret
+              key: WORDPRESS_DB_USER
+        - name: WORDPRESS_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-secret
+              key: WORDPRESS_DB_PASSWORD
+      volumes:
+        - name: wp-config-volume
+          configMap:
+            name: wp-config
+        - name: wordpress-pvc
+          persistentVolumeClaim:
+            claimName: wordpress-pvc
+
+--
+kubectl apply -f wordpress-deployment.yaml
+kubectl delete -f wordpress-deployment.yaml
+kubectl exec -n nxus -it wordpress-64bd9fc867-t9xzs -- /bin/bash  ---> go to inside the container
+
+kubectl logs -f wordpress-64bd9fc867-lv247 -n nxus -c wordpress  ---> check the container log 
+kubectl logs wordpress-64bd9fc867-lv247 -n nxus  -----------> to check the pod logs
+
+
+
+kubectl get configmaps -n nxus
+kubectl describe configmap wp-config -n nxus
+
+---wordpress-secret.yaml RDS--------------------
+
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wordpress-secret
+  namespace: nxus
+type: Opaque
+stringData:
+  WORDPRESS_DB_HOST: database-1.cfom8s8kc8iw.us-east-2.rds.amazonaws.com
+  WORDPRESS_DB_NAME: wordpressdb
+  WORDPRESS_DB_USER: admin
+  WORDPRESS_DB_PASSWORD: OLz7bM7UpX4s3E
+  
+  --
+  kubectl apply -f wordpress-secret.yaml
+
+ kubectl get secrets -n nxus
+kubectl get secrets -n nxusNAME               TYPE     DATA   AGE
+mysql-secret       Opaque   3      27h
+
+
+kubectl get secret wordpress-secret -n nxus -o yaml --------->>>>> to shwo wordpress secret 
+
+
+  
+  -------wordpress-service.yaml---------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress
+  namespace: nxus
+spec:
+  type: NodePort  # change to ClusterIP if using ingress
+  selector:
+    app: wordpress
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080
+      
+----------
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-server-loadbalancer
+  namespace: nxus
+spec:
+  type: LoadBalancer
+  selector:
+    app: web-server
+  ports:
+    - protocol: TCP
+      port: 80           # Port exposed by the service externally
+      targetPort: 80     # Port exposed by the containe
+    
+      
+  --
+  wordpress-service.yaml
+  
+  kubectl apply -f wordpress-service.yaml
+
+kubectl get svc -n nxus  --> to check the service
+
+kubectl get svc -n nxusNAME        TYPE       CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE
+wordpress   NodePort   10.100.12.42   <none>        80:30080/TCP   41h
+
+---------Create mysql client to connec the rds-------------------------------------------------
+ 
+ k -n nexus run -it mysql --image=mysql -- bash
+ 
+ mysql-dev.clcugigy8syn.us-east-2.rds.amazonaws.com
+user : admin
+PWd : OLz7bM7UpX4s
+
+
+mysql -h mysql-dev.clcugigy8syn.us-east-2.rds.amazonaws.com -P 3306 -u admin -pOLz7bM7UpX4s
+
+
+
+
+
+CREATE DATABASE wordpressdb;
+GRANT ALL PRIVILEGES ON wordpressdb.* TO 'wpuser'@'%';
+FLUSH PRIVILEGES;
+
+DROP USER 'wpuser'@'%';
+CREATE USER 'wpuser'@'%' IDENTIFIED BY 'OLz7bM7UpX4s3E';
+GRANT ALL PRIVILEGES ON wordpressdb.* TO 'wpuser'@'%';
+FLUSH PRIVILEGES;
+DROP DATABASE wordpressdb;
+
+If We delte the pod then wp-admin password removed need to recover we need to set wo_user password using below qurery.
+
+UPDATE wp_users SET user_pass = MD5('TestFG@12345') WHERE user_login = 'admin';
+ 
+
+ 
+    
+      
+---------wp-config-configmap.yaml---------------------------------------------------
+
+kubectl apply -f wp-config-configmap.yaml
+kubectl get configmap wp-config -n nxus   -----> to check the config file 
+NAME        DATA   AGE
+wp-config   1      7h14m
+
+kubectl get configmap wp-config -n nxus -o yaml  -----> to check the config file 
+
+kubectl get configmaps -n nxus
+kubectl delete configmap wp-config -n nxus
+--  
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wp-config
+  namespace: nxus
+data:
+  wp-config.php: |
+    <?php
+    /**
+     * The base configuration for WordPress
+     *
+     * The wp-config.php creation script uses this file during the installation.
+     * You don't have to use the website, you can copy this file to "wp-config.php"
+     * and fill in the values.
+     *
+     * This file contains the following configurations:
+     *
+     * * Database settings
+     * * Secret keys
+     * * Database table prefix
+     * * ABSPATH
+     *
+     * This has been slightly modified (to read environment variables) for use in Docker.
+     *
+     * @link https://developer.wordpress.org/advanced-administration/wordpress/wp-config/
+     *
+     * @package WordPress
+     */
+
+    // IMPORTANT: this file needs to stay in-sync with https://github.com/WordPress/WordPress/blob/master/wp-config-sample.php
+    // (it gets parsed by the upstream wizard in https://github.com/WordPress/WordPress/blob/f27cb65e1ef25d11b535695a660e7282b98eb742/wp-admin/setup-config.php#L356-L392)
+
+    // a helper function to lookup "env_FILE", "env", then fallback
+    if (!function_exists('getenv_docker')) {
+        // https://github.com/docker-library/wordpress/issues/588 (WP-CLI will load this file 2x)
+        function getenv_docker($env, $default) {
+            if ($fileEnv = getenv($env . '_FILE')) {
+                return rtrim(file_get_contents($fileEnv), "\r\n");
+            } else if (($val = getenv($env)) !== false) {
+                return $val;
+            } else {
+                return $default;
+            }
+        }
+    }
+
+    // ** Database settings - You can get this info from your web host ** //
+    /** The name of the database for WordPress */
+    define( 'DB_NAME', getenv_docker('WORDPRESS_DB_NAME', 'wordpressdb') );
+
+    /** Database username */
+    define( 'DB_USER', getenv_docker('WORDPRESS_DB_USER', 'wpuser') );
+
+    /** Database password */
+    define( 'DB_PASSWORD', getenv_docker('WORDPRESS_DB_PASSWORD', 'OLz7bM7UpX4s3E') );
+
+    /** Database hostname */
+    define( 'DB_HOST', getenv_docker('WORDPRESS_DB_HOST', 'mysql-dev.clcugigy8syn.us-east-2.rds.amazonaws.com') );
+
+    /** Database charset to use in creating database tables. */
+    define( 'DB_CHARSET', getenv_docker('WORDPRESS_DB_CHARSET', 'utf8') );
+
+    /** The database collate type. Don't change this if in doubt. */
+    define( 'DB_COLLATE', getenv_docker('WORDPRESS_DB_COLLATE', '') );
+
+    /**#@+
+     * Authentication unique keys and salts.
+     */
+    define( 'AUTH_KEY',         getenv_docker('WORDPRESS_AUTH_KEY',         'db7ffca46995271c9bfb7a44908b4b225cd585ce') );
+    define( 'SECURE_AUTH_KEY',  getenv_docker('WORDPRESS_SECURE_AUTH_KEY',  '459c67969dfbf1fcfed3320982471511e9f01fe9') );
+    define( 'LOGGED_IN_KEY',    getenv_docker('WORDPRESS_LOGGED_IN_KEY',    '5e07f95b3e0113d7fd8e5c28c8e65b971ed0e293') );
+    define( 'NONCE_KEY',        getenv_docker('WORDPRESS_NONCE_KEY',        'b1aac933b215286f6e9dcc856053e0dc1124e609') );
+    define( 'AUTH_SALT',        getenv_docker('WORDPRESS_AUTH_SALT',        'b5d5d1bc76a8a1dea5244c715bbb1c91dfe09559') );
+    define( 'SECURE_AUTH_SALT', getenv_docker('WORDPRESS_SECURE_AUTH_SALT', 'd45bee865fd4e05fe2ac2605ae828924c31f3dcb') );
+    define( 'LOGGED_IN_SALT',   getenv_docker('WORDPRESS_LOGGED_IN_SALT',   '7951549b6308d58c13c2cab4a88a1d3b52924a45') );
+    define( 'NONCE_SALT',       getenv_docker('WORDPRESS_NONCE_SALT',       'fccca06f959ba91ae8736ba41b213fb2f8bcda2c') );
+    /**#@-*/
+
+    /**
+     * WordPress database table prefix.
+     */
+    $table_prefix = getenv_docker('WORDPRESS_TABLE_PREFIX', 'wp_');
+
+    /**
+     * For developers: WordPress debugging mode.
+     */
+    define( 'WP_DEBUG', !!getenv_docker('WORDPRESS_DEBUG', '') );
+
+    /* Add any custom values between this line and the "stop editing" line. */
+
+    // If we're behind a proxy server and using HTTPS, we need to alert WordPress of that fact
+    if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strpos($_SERVER['HTTP_X_FORWARDED_PROTO'], 'https') !== false) {
+        $_SERVER['HTTPS'] = 'on';
+    }
+
+    if ($configExtra = getenv_docker('WORDPRESS_CONFIG_EXTRA', '')) {
+        eval($configExtra);
+    }
+
+    /* That's all, stop editing! Happy publishing. */
+
+    /** Absolute path to the WordPress directory. */
+    if ( ! defined( 'ABSPATH' ) ) {
+        define( 'ABSPATH', __DIR__ . '/' );
+    }
+
+    /** Sets up WordPress vars and included files. */
+    require_once ABSPATH . 'wp-settings.php';
+
+---------------------------------------------------------------------------------------
+  
+      
