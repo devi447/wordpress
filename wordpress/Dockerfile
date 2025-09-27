@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 RUN a2enmod rewrite
 
 # Copy custom PHP config (optional)
-COPY ./php.ini /usr/local/etc/php/
+#COPY ./php.ini /usr/local/etc/php/
 
 # Copy custom WordPress plugins/themes (if you have them)
 # Example: Copy your theme
