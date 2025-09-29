@@ -2,7 +2,9 @@
 /**
  * The base configuration for WordPress
  *
-# this file has been ..........testing 
+#testing
+
+#this file has been ..........testing 
  * The wp-config.php creation script uses this file during the installation.
  * You don't have to use the website, you can copy this file to "wp-config.php"
  * and fill in the values.
