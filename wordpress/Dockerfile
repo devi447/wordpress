@@ -25,6 +25,7 @@ RUN mkdir -p /var/www/html/wp-content/uploads \
 
 # Set ownership for all WordPress files
 RUN chown -R www-data:www-data /var/www/html
+RUN chmod -R 777 /var/www/html/wp-content/uploads
 
 # Expose port 80
 EXPOSE 80
